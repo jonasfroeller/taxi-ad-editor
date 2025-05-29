@@ -22,6 +22,7 @@ const ThumbnailEditor = () => {
   });
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState(null);
+  const [isShiftPressed, setIsShiftPressed] = useState(false);
 
   // Canvas dimensions - display size (3:1 ratio)
   const DISPLAY_WIDTH = 768;
@@ -34,6 +35,27 @@ const ThumbnailEditor = () => {
   useEffect(() => {
     redrawCanvas();
   }, [images, texts, selectedElement]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(true);
+      }
+    };
+    const handleKeyUp = (e) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   const redrawCanvas = () => {
     const canvas = canvasRef.current;
@@ -246,52 +268,199 @@ const ThumbnailEditor = () => {
     const y = e.clientY - rect.top;
 
     if (isResizing && selectedElement && selectedElement.type === 'image') {
-      const img = images[selectedElement.index];
-      setImages(prev => prev.map((image, index) => {
+      setImages(prevImgs => prevImgs.map((image, index) => {
         if (index === selectedElement.index) {
-          let newWidth = image.width;
-          let newHeight = image.height;
-          let newX = image.x;
-          let newY = image.y;
+          let nX = image.x;
+          let nY = image.y;
+          let nW = image.width;
+          let nH = image.height;
+          const originalAspectRatio = image.originalWidth / image.originalHeight;
 
-          switch (resizeHandle) {
-            case 'se': // bottom-right
-              newWidth = Math.max(20, x - image.x);
-              newHeight = Math.max(20, y - image.y);
-              break;
-            case 'sw': // bottom-left
-              newWidth = Math.max(20, image.x + image.width - x);
-              newHeight = Math.max(20, y - image.y);
-              newX = x;
-              break;
-            case 'ne': // top-right
-              newWidth = Math.max(20, x - image.x);
-              newHeight = Math.max(20, image.y + image.height - y);
-              newY = y;
-              break;
-            case 'nw': // top-left
-              newWidth = Math.max(20, image.x + image.width - x);
-              newHeight = Math.max(20, image.y + image.height - y);
-              newX = x;
-              newY = y;
-              break;
-            case 'e': // right
-              newWidth = Math.max(20, x - image.x);
-              break;
-            case 'w': // left
-              newWidth = Math.max(20, image.x + image.width - x);
-              newX = x;
-              break;
-            case 'n': // top
-              newHeight = Math.max(20, image.y + image.height - y);
-              newY = y;
-              break;
-            case 's': // bottom
-              newHeight = Math.max(20, y - image.y);
-              break;
+          // Store the image's state *before* this resize operation for anchor calculations.
+          const currentImgX = image.x;
+          const currentImgY = image.y;
+          const currentImgW = image.width;
+          const currentImgH = image.height;
+
+          if (isShiftPressed && ['nw', 'ne', 'sw', 'se'].includes(resizeHandle)) {
+            // Aspect ratio locked resize for corner handles
+            switch (resizeHandle) {
+              case 'se': { // Anchor: top-left
+                const anchorX = currentImgX;
+                const anchorY = currentImgY;
+                let targetW = x - anchorX;
+                let targetH = y - anchorY;
+                if (originalAspectRatio === 0) { // Avoid division by zero, treat as free resize
+                  nW = Math.max(20, targetW);
+                  nH = Math.max(20, targetH);
+                } else if (targetW / originalAspectRatio >= targetH) {
+                  nW = targetW;
+                  nH = nW / originalAspectRatio;
+                } else {
+                  nH = targetH;
+                  nW = nH * originalAspectRatio;
+                }
+                nX = anchorX;
+                nY = anchorY;
+                break;
+              }
+              case 'sw': { // Anchor: top-right
+                const anchorX = currentImgX + currentImgW;
+                const anchorY = currentImgY;
+                let targetW = anchorX - x;
+                let targetH = y - anchorY;
+                if (originalAspectRatio === 0) {
+                  nW = Math.max(20, targetW);
+                  nH = Math.max(20, targetH);
+                } else if (targetW / originalAspectRatio >= targetH) {
+                  nW = targetW;
+                  nH = nW / originalAspectRatio;
+                } else {
+                  nH = targetH;
+                  nW = nH * originalAspectRatio;
+                }
+                nX = anchorX - nW;
+                nY = anchorY;
+                break;
+              }
+              case 'ne': { // Anchor: bottom-left
+                const anchorX = currentImgX;
+                const anchorY = currentImgY + currentImgH;
+                let targetW = x - anchorX;
+                let targetH = anchorY - y;
+                 if (originalAspectRatio === 0) {
+                  nW = Math.max(20, targetW);
+                  nH = Math.max(20, targetH);
+                } else if (targetW / originalAspectRatio >= targetH) {
+                  nW = targetW;
+                  nH = nW / originalAspectRatio;
+                } else {
+                  nH = targetH;
+                  nW = nH * originalAspectRatio;
+                }
+                nX = anchorX;
+                nY = anchorY - nH;
+                break;
+              }
+              case 'nw': { // Anchor: bottom-right
+                const anchorX = currentImgX + currentImgW;
+                const anchorY = currentImgY + currentImgH;
+                let targetW = anchorX - x;
+                let targetH = anchorY - y;
+                if (originalAspectRatio === 0) {
+                  nW = Math.max(20, targetW);
+                  nH = Math.max(20, targetH);
+                } else if (targetW / originalAspectRatio >= targetH) {
+                  nW = targetW;
+                  nH = nW / originalAspectRatio;
+                } else {
+                  nH = targetH;
+                  nW = nH * originalAspectRatio;
+                }
+                nX = anchorX - nW;
+                nY = anchorY - nH;
+                break;
+              }
+            }
+
+            // Apply minimum size constraints AFTER aspect ratio calculation
+            // And re-adjust the other dimension and position if necessary
+            let finalW = nW;
+            let finalH = nH;
+
+            if (originalAspectRatio > 0) { // Only apply aspect ratio clamping if AR is valid
+              if (finalW < 20 && finalH < 20) { // If both dimensions would be too small
+                  if (finalW / originalAspectRatio >= finalH) { // Width is 'more too small' or equally
+                      finalW = 20;
+                      finalH = finalW / originalAspectRatio;
+                  } else { // Height is 'more too small'
+                      finalH = 20;
+                      finalW = finalH * originalAspectRatio;
+                  }
+                  // One more pass to ensure the other isn't too small after fixing one
+                  if (finalW < 20) { finalW = 20; finalH = finalW / originalAspectRatio;}
+                  if (finalH < 20) { finalH = 20; finalW = finalH * originalAspectRatio;}
+
+              } else if (finalW < 20) {
+                  finalW = 20;
+                  finalH = finalW / originalAspectRatio;
+              } else if (finalH < 20) {
+                  finalH = 20;
+                  finalW = finalH * originalAspectRatio;
+              }
+            } else { // Fallback for zero aspect ratio - just clamp individually
+                finalW = Math.max(20, finalW);
+                finalH = Math.max(20, finalH);
+            }
+            
+            nW = Math.max(20, finalW); // Ensure at least 20px after all calculations
+            nH = Math.max(20, finalH); // Ensure at least 20px
+
+            // Recalculate positions based on the *final* clamped nW, nH
+            switch (resizeHandle) {
+                case 'se':
+                    nX = currentImgX; nY = currentImgY;
+                    break;
+                case 'sw':
+                    nX = (currentImgX + currentImgW) - nW; nY = currentImgY;
+                    break;
+                case 'ne':
+                    nX = currentImgX; nY = (currentImgY + currentImgH) - nH;
+                    break;
+                case 'nw':
+                    nX = (currentImgX + currentImgW) - nW; nY = (currentImgY + currentImgH) - nH;
+                    break;
+            }
+
+          } else { // (no shift, or edge handles)
+            switch (resizeHandle) {
+              case 'se':
+                nW = Math.max(20, x - currentImgX);
+                nH = Math.max(20, y - currentImgY);
+                break;
+              case 'sw':
+                nW = Math.max(20, currentImgX + currentImgW - x);
+                nH = Math.max(20, y - currentImgY);
+                nX = x;
+                break;
+              case 'ne':
+                nW = Math.max(20, x - currentImgX);
+                nH = Math.max(20, currentImgY + currentImgH - y);
+                nY = y;
+                break;
+              case 'nw':
+                nW = Math.max(20, currentImgX + currentImgW - x);
+                nH = Math.max(20, currentImgY + currentImgH - y);
+                nX = x;
+                nY = y;
+                break;
+              case 'e':
+                nW = Math.max(20, x - currentImgX);
+                nH = currentImgH;
+                nX = currentImgX;
+                nY = currentImgY;
+                break;
+              case 'w':
+                nW = Math.max(20, currentImgX + currentImgW - x);
+                nX = x;
+                nH = currentImgH;
+                nY = currentImgY;
+                break;
+              case 'n':
+                nH = Math.max(20, currentImgY + currentImgH - y);
+                nY = y;
+                nW = currentImgW;
+                nX = currentImgX;
+                break;
+              case 's':
+                nH = Math.max(20, y - currentImgY);
+                nW = currentImgW;
+                nX = currentImgX;
+                nY = currentImgY;
+                break;
+            }
           }
-
-          return { ...image, x: newX, y: newY, width: newWidth, height: newHeight };
+          return { ...image, x: nX, y: nY, width: nW, height: nH };
         }
         return image;
       }));
