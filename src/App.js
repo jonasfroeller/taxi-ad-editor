@@ -5,6 +5,7 @@ const ThumbnailEditor = () => {
   const canvasRef = useRef(null);
   const [images, setImages] = useState([]);
   const [texts, setTexts] = useState([]);
+  const [rectangles, setRectangles] = useState([]);
   const [selectedTool, setSelectedTool] = useState('select');
   const [selectedElement, setSelectedElement] = useState(null);
   const [exportFormat, setExportFormat] = useState('png');
@@ -23,6 +24,20 @@ const ThumbnailEditor = () => {
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState(null);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
+  const [editingTextIndex, setEditingTextIndex] = useState(null);
+  const [inlineInputValue, setInlineInputValue] = useState('');
+  const [newTextPosition, setNewTextPosition] = useState({ x: 768 / 2, y: 256 / 2 });
+
+  const initialBackgroundConfig = {
+    type: 'solid', // solid, linear, radial
+    colors: [{ id: Date.now(), color: '#ffffff', stop: 0 }], // For solid, only first color used
+    angle: 90, // For linear
+    radialShape: 'ellipse', // 'ellipse' or 'circle'
+    radialExtent: 'farthest-corner', // 'closest-side', 'closest-corner', 'farthest-side', 'farthest-corner'
+    radialCenterX: '50%',
+    radialCenterY: '50%',
+  };
+  const [backgroundConfig, setBackgroundConfig] = useState(initialBackgroundConfig);
 
   // Canvas dimensions - display size (3:1 ratio)
   const DISPLAY_WIDTH = 768;
@@ -32,9 +47,12 @@ const ThumbnailEditor = () => {
   const EXPORT_WIDTH = 384;
   const EXPORT_HEIGHT = 128;
 
+  const DEFAULT_RECT_WIDTH = 150;
+  const DEFAULT_RECT_HEIGHT = 80;
+
   useEffect(() => {
     redrawCanvas();
-  }, [images, texts, selectedElement]);
+  }, [images, texts, rectangles, selectedElement, backgroundConfig]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -57,6 +75,117 @@ const ThumbnailEditor = () => {
     };
   }, []);
 
+  const parseCanvasGradient = (ctx, config, width, height) => {
+    if (config.type === 'solid') {
+      return config.colors[0]?.color || '#ffffff';
+    }
+    if (config.type === 'linear') {
+      if (!config.colors || config.colors.length < 1) return '#ffffff'; // Need at least one color
+      if (config.colors.length === 1) return config.colors[0].color; // Treat as solid if only one color
+
+      let angle = config.angle || 0;
+      let startX = 0, startY = 0, endX = 0, endY = 0;
+
+      // Simplified angle to x,y mapping for createLinearGradient
+      // (0,0) is top-left. Angles in CSS are different from typical math angles.
+      // CSS: 0deg to top, 90deg to right, 180deg to bottom, 270deg to left.
+      const rad = (angle - 90) * Math.PI / 180; // Adjust angle for math cos/sin (0 = right)
+      startX = 0; 
+      startY = height / 2; // Start at mid-left for horizontal gradients by default
+      endX = width;
+      endY = height / 2; // End at mid-right
+
+      if (angle === 0) { // To Top
+        startX = width / 2; startY = height; endX = width / 2; endY = 0;
+      } else if (angle === 90) { // To Right
+        startX = 0; startY = height / 2; endX = width; endY = height / 2;
+      } else if (angle === 180) { // To Bottom
+        startX = width / 2; startY = 0; endX = width / 2; endY = height;
+      } else if (angle === 270) { // To Left
+        startX = width; startY = height / 2; endX = 0; endY = height / 2;
+      } else if (angle > 0 && angle < 90) { // Top-right quadrant
+        startX = 0; startY = height; endX = width; endY = 0;
+      } else if (angle > 90 && angle < 180) { // Bottom-right quadrant
+        startX = 0; startY = 0; endX = width; endY = height;
+      } else if (angle > 180 && angle < 270) { // Bottom-left quadrant
+        startX = width; startY = 0; endX = 0; endY = height;
+      } else if (angle > 270 && angle < 360) { // Top-left quadrant
+        startX = width; startY = height; endX = 0; endY = 0;
+      }
+
+      const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
+      const sortedColors = [...config.colors].sort((a, b) => a.stop - b.stop);
+      
+      sortedColors.forEach(stop => {
+        // Ensure stop is between 0 and 1 for addColorStop
+        const offset = Math.max(0, Math.min(1, stop.stop / 100));
+        gradient.addColorStop(offset, stop.color);
+      });
+      return gradient;
+    }
+    if (config.type === 'radial') {
+      if (!config.colors || config.colors.length < 1) return '#ffffff';
+      if (config.colors.length === 1) return config.colors[0].color;
+
+      const centerXStr = config.radialCenterX || '50%';
+      const centerYStr = config.radialCenterY || '50%';
+      const shape = config.radialShape || 'ellipse';
+      const extent = config.radialExtent || 'farthest-corner';
+
+      const cx = parseFloat(centerXStr) / 100 * width;
+      const cy = parseFloat(centerYStr) / 100 * height;
+      let r1 = 0;
+
+      // Distances from center to the 4 corners
+      const distToCorners = [
+        Math.sqrt(cx*cx + cy*cy), // top-left
+        Math.sqrt(Math.pow(width-cx,2) + cy*cy), // top-right
+        Math.sqrt(cx*cx + Math.pow(height-cy,2)), // bottom-left
+        Math.sqrt(Math.pow(width-cx,2) + Math.pow(height-cy,2)) // bottom-right
+      ];
+      // Distances from center to the 4 sides (absolute values)
+      const distToSides = [
+        cy, // to top
+        width - cx, // to right
+        height - cy, // to bottom
+        cx // to left
+      ];
+
+      switch (extent) {
+        case 'closest-side':
+          r1 = Math.min(...distToSides.map(d => Math.abs(d)).filter(d => d >= 0));
+          break;
+        case 'closest-corner':
+          r1 = Math.min(...distToCorners.filter(d => d >= 0));
+          break;
+        case 'farthest-side':
+          r1 = Math.max(...distToSides.map(d => Math.abs(d)).filter(d => d >= 0));
+          break;
+        case 'farthest-corner':
+        default:
+          r1 = Math.max(...distToCorners.filter(d => d >= 0));
+          break;
+      }
+      
+      if (shape === 'circle') {
+        // For a circle, r1 is straightforward.
+      } else { // Ellipse: HTML canvas createRadialGradient makes circles.
+               // We use r1 as the radius of the larger circle that would encompass the ellipse defined by the extent.
+               // This is a simplification. For a true ellipse, one might scale the context.
+      }
+      if (r1 <= 0) r1 = Math.max(width, height);
+
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, r1);
+      const sortedColors = [...config.colors].sort((a, b) => a.stop - b.stop);
+      sortedColors.forEach(stop => {
+        const offset = Math.max(0, Math.min(1, stop.stop / 100));
+        gradient.addColorStop(offset, stop.color);
+      });
+      return gradient;
+    }
+    return '#ffffff';
+  };
+
   const redrawCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -65,7 +194,9 @@ const ThumbnailEditor = () => {
     console.log('Redrawing canvas with texts:', texts);
     
     ctx.clearRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    ctx.fillStyle = '#ffffff';
+
+    const bgStyle = parseCanvasGradient(ctx, backgroundConfig, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    ctx.fillStyle = bgStyle;
     ctx.fillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     
     images.forEach((img, index) => {
@@ -85,17 +216,72 @@ const ThumbnailEditor = () => {
       }
     });
     
+    // Draw rectangles
+    rectangles.forEach((rectEl, index) => {
+      ctx.fillStyle = rectEl.backgroundColor;
+      ctx.strokeStyle = rectEl.borderColor;
+      ctx.lineWidth = rectEl.borderWidth;
+
+      ctx.beginPath();
+      if (rectEl.borderRadius > 0) {
+        // Draw rounded rectangle
+        ctx.moveTo(rectEl.x + rectEl.borderRadius, rectEl.y);
+        ctx.arcTo(rectEl.x + rectEl.width, rectEl.y, rectEl.x + rectEl.width, rectEl.y + rectEl.height, rectEl.borderRadius);
+        ctx.arcTo(rectEl.x + rectEl.width, rectEl.y + rectEl.height, rectEl.x, rectEl.y + rectEl.height, rectEl.borderRadius);
+        ctx.arcTo(rectEl.x, rectEl.y + rectEl.height, rectEl.x, rectEl.y, rectEl.borderRadius);
+        ctx.arcTo(rectEl.x, rectEl.y, rectEl.x + rectEl.width, rectEl.y, rectEl.borderRadius);
+      } else {
+        // Draw sharp rectangle
+        ctx.rect(rectEl.x, rectEl.y, rectEl.width, rectEl.height);
+      }
+      ctx.closePath();
+
+      if (rectEl.backgroundColor && rectEl.backgroundColor !== 'transparent') {
+          ctx.fill();
+      }
+      if (rectEl.borderWidth > 0 && rectEl.borderColor) {
+        ctx.stroke();
+      }
+
+      // Draw selection handles for selected rectangle
+      if (selectedElement && selectedElement.type === 'rectangle' && selectedElement.index === index) {
+        drawSelectionHandles(ctx, rectEl.x, rectEl.y, rectEl.width, rectEl.height);
+      }
+    });
+    
     // Draw texts
     texts.forEach((text, index) => {
       console.log('Drawing text:', text.content, 'at position:', text.x, text.y);
       ctx.font = `${text.style.fontStyle} ${text.style.fontWeight} ${text.style.fontSize}px ${text.style.fontFamily}`;
       ctx.fillStyle = text.style.color;
-      ctx.fillText(text.content, text.x, text.y);
+
+      // Do not draw text if it's being edited inline
+      if (index === editingTextIndex) {
+        // Optionally, draw a light placeholder or nothing
+      } else {
+        ctx.fillText(text.content, text.x, text.y);
+      }
       
-      // Draw selection indicator for selected text
-      if (selectedElement && selectedElement.type === 'text' && selectedElement.index === index) {
+      // Draw selection indicator for selected text (even if being edited, to show selection box)
+      // BUT NOT if it's currently being inline-edited, as the inline editor has its own border.
+      if (selectedElement && selectedElement.type === 'text' && selectedElement.index === index && index !== editingTextIndex) {
         const metrics = ctx.measureText(text.content);
-        drawTextSelection(ctx, text.x, text.y - text.style.fontSize, metrics.width, text.style.fontSize);
+        const ascent = metrics.actualBoundingBoxAscent;
+        const descent = metrics.actualBoundingBoxDescent;
+        const validAscent = (typeof ascent === 'number' && isFinite(ascent)) ? ascent : text.style.fontSize * 0.8;
+        const validDescent = (typeof descent === 'number' && isFinite(descent)) ? descent : text.style.fontSize * 0.2;
+        const textActualHeight = validAscent + validDescent;
+        const textActualTopY = text.y - validAscent;
+
+        const selectionBoxPadding = 2; // Padding around the text for the selection box
+
+        drawTextSelection(
+          ctx, 
+          text.x - selectionBoxPadding, 
+          textActualTopY - selectionBoxPadding, 
+          metrics.width + (2 * selectionBoxPadding), 
+          textActualHeight + (2 * selectionBoxPadding)
+        );
       }
     });
   };
@@ -126,16 +312,24 @@ const ThumbnailEditor = () => {
   };
 
   const drawTextSelection = (ctx, x, y, width, height) => {
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 4]);
-    ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
+    ctx.strokeStyle = '#2563eb'; // Same color as inline editor border
+    ctx.lineWidth = 1;           // Same line width as inline editor border
+    ctx.setLineDash([2, 2]);     // A tight dash pattern
+    // Draw the rectangle tightly around the text metrics
+    // x is the left, y IS THE TOP, width is width, height is height (fontSize)
+    ctx.strokeRect(x, y, width, height);
     ctx.setLineDash([]);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    // Calculate drop position relative to the canvas
+    const dropX = e.clientX - rect.left;
+    const dropY = e.clientY - rect.top;
     
     files.forEach(file => {
       if (file.type.startsWith('image/')) {
@@ -160,8 +354,8 @@ const ThumbnailEditor = () => {
             const newImage = {
               id: Date.now() + Math.random(),
               element: img,
-              x: (DISPLAY_WIDTH - width) / 2,
-              y: (DISPLAY_HEIGHT - height) / 2,
+              x: dropX - width / 2,
+              y: dropY - height / 2,
               width,
               height,
               originalWidth: img.width,
@@ -209,10 +403,12 @@ const ThumbnailEditor = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Check if clicking on resize handle for selected image
-    if (selectedElement && selectedElement.type === 'image') {
-      const img = images[selectedElement.index];
-      const handle = getResizeHandle(x, y, img);
+    // Check if clicking on resize handle for selected image OR RECTANGLE
+    if (selectedElement && (selectedElement.type === 'image' || selectedElement.type === 'rectangle')) {
+      const element = selectedElement.type === 'image' 
+                      ? images[selectedElement.index]
+                      : rectangles[selectedElement.index];
+      const handle = getResizeHandle(x, y, element);
       if (handle) {
         setIsResizing(true);
         setResizeHandle(handle);
@@ -220,6 +416,43 @@ const ThumbnailEditor = () => {
       }
     }
 
+    // Priority: Texts, then Rectangles, then Images
+    // Check if clicking on text
+    for (let i = texts.length - 1; i >= 0; i--) {
+      const text = texts[i];
+      const canvasCtx = canvas.getContext('2d'); // Use canvasRef for context
+      canvasCtx.font = `${text.style.fontStyle} ${text.style.fontWeight} ${text.style.fontSize}px ${text.style.fontFamily}`;
+      const metrics = canvasCtx.measureText(text.content);
+      
+      // Approximate clickable area: consider ascent and descent for more accuracy
+      const ascent = metrics.actualBoundingBoxAscent || text.style.fontSize * 0.8;
+      const descent = metrics.actualBoundingBoxDescent || text.style.fontSize * 0.2;
+      const textHeight = ascent + descent;
+      const textTopY = text.y - ascent; // Y is baseline, so top is y - ascent
+
+      if (x >= text.x && x <= text.x + metrics.width && 
+          y >= textTopY && y <= textTopY + textHeight) {
+        setSelectedElement({ type: 'text', index: i });
+        setDraggedElement({ type: 'text', index: i });
+        setDragOffset({ x: x - text.x, y: y - text.y });
+        setIsDragging(true);
+        return;
+      }
+    }
+
+    // Check if clicking on a rectangle
+    for (let i = rectangles.length - 1; i >= 0; i--) {
+      const rectEl = rectangles[i];
+      if (x >= rectEl.x && x <= rectEl.x + rectEl.width &&
+          y >= rectEl.y && y <= rectEl.y + rectEl.height) {
+        setSelectedElement({ type: 'rectangle', index: i });
+        setDraggedElement({ type: 'rectangle', index: i });
+        setDragOffset({ x: x - rectEl.x, y: y - rectEl.y });
+        setIsDragging(true);
+        return;
+      }
+    }
+    
     // Check if clicking on an image
     for (let i = images.length - 1; i >= 0; i--) {
       const img = images[i];
@@ -233,31 +466,97 @@ const ThumbnailEditor = () => {
       }
     }
 
-    // Check if clicking on text
-    for (let i = texts.length - 1; i >= 0; i--) {
-      const text = texts[i];
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      ctx.font = `${text.style.fontStyle} ${text.style.fontWeight} ${text.style.fontSize}px ${text.style.fontFamily}`;
-      const metrics = ctx.measureText(text.content);
-      
-      if (x >= text.x && x <= text.x + metrics.width && 
-          y >= text.y - text.style.fontSize && y <= text.y) {
-        setSelectedElement({ type: 'text', index: i });
-        setDraggedElement({ type: 'text', index: i });
-        setDragOffset({ x: x - text.x, y: y - text.y });
-        setIsDragging(true);
-        return;
-      }
-    }
-
     // Clear selection if clicking empty area
     setSelectedElement(null);
 
     // If no element clicked and text tool is selected, add text
-    if (selectedTool === 'text') {
-      setShowTextDialog(true);
+    if (selectedTool === 'text' && !draggedElement) {
       setNewText('');
+      setTextStyle({
+        fontSize: 24,
+        fontFamily: 'Arial',
+        color: '#000000',
+        fontWeight: 'normal',
+        fontStyle: 'normal'
+      });
+      setEditingTextIndex(null);
+      setNewTextPosition({ x, y }); // Store click position
+      setShowTextDialog(true);
+    } else if (selectedTool === 'rectangle' && !draggedElement) {
+      // Add a new rectangle if rectangle tool is selected and clicked on empty space
+      const newRect = {
+        id: Date.now(),
+        type: 'rectangle',
+        x: x - DEFAULT_RECT_WIDTH / 2,
+        y: y - DEFAULT_RECT_HEIGHT / 2,
+        width: DEFAULT_RECT_WIDTH,
+        height: DEFAULT_RECT_HEIGHT,
+        backgroundColor: '#cccccc',
+        borderColor: '#333333',
+        borderWidth: 2,
+        borderRadius: 0,
+        originalWidth: DEFAULT_RECT_WIDTH,
+        originalHeight: DEFAULT_RECT_HEIGHT,
+      };
+      setRectangles(prev => [...prev, newRect]);
+      setSelectedElement({ type: 'rectangle', index: rectangles.length }); // Auto-select the new rectangle
+      setSelectedTool('select'); // Switch to select tool after adding
+    }
+  };
+
+  const handleCanvasDoubleClick = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const ctx = canvas.getContext('2d');
+
+    // If an inline edit is active and the click is outside the potential input area, commit edit.
+    if (editingTextIndex !== null) {
+      // This logic might need refinement if the input is a child of the canvas's parent
+    }
+
+    // Priority for double click: Texts (for editing), then Rectangles, then Images
+    // Check if clicking on text
+    for (let i = texts.length - 1; i >= 0; i--) {
+      const text = texts[i];
+      ctx.font = `${text.style.fontStyle} ${text.style.fontWeight} ${text.style.fontSize}px ${text.style.fontFamily}`;
+      const metrics = ctx.measureText(text.content);
+      
+      const ascent = metrics.actualBoundingBoxAscent || text.style.fontSize * 0.8;
+      const descent = metrics.actualBoundingBoxDescent || text.style.fontSize * 0.2;
+      const textHeight = ascent + descent;
+      const textTopY = text.y - ascent;
+
+      if (x >= text.x && x <= text.x + metrics.width && y >= textTopY && y <= textTopY + textHeight) {
+        setSelectedElement({ type: 'text', index: i });
+        setEditingTextIndex(i);
+        setInlineInputValue(text.content);
+        return; 
+      }
+    }
+    
+    // Check if clicking on a rectangle
+    for (let i = rectangles.length - 1; i >= 0; i--) {
+        const rectEl = rectangles[i];
+        if (x >= rectEl.x && x <= rectEl.x + rectEl.width &&
+            y >= rectEl.y && y <= rectEl.y + rectEl.height) {
+          setSelectedElement({ type: 'rectangle', index: i });
+          // No specific double-click action for rectangles for now, just select
+          return;
+        }
+    }
+
+    // Check if clicking on an image
+    for (let i = images.length - 1; i >= 0; i--) {
+      const img = images[i];
+      if (x >= img.x && x <= img.x + img.width && 
+          y >= img.y && y <= img.y + img.height) {
+        setSelectedElement({ type: 'image', index: i });
+        // No specific double-click action for images for now, just select
+        return;
+      }
     }
   };
 
@@ -267,27 +566,34 @@ const ThumbnailEditor = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    if (isResizing && selectedElement && selectedElement.type === 'image') {
-      setImages(prevImgs => prevImgs.map((image, index) => {
-        if (index === selectedElement.index) {
-          let nX = image.x;
-          let nY = image.y;
-          let nW = image.width;
-          let nH = image.height;
-          const originalAspectRatio = image.originalWidth / image.originalHeight;
+    if (isResizing && selectedElement && (selectedElement.type === 'image' || selectedElement.type === 'rectangle')) {
+      const elementType = selectedElement.type;
+      const elementIndex = selectedElement.index;
 
-          // Store the image's state *before* this resize operation for anchor calculations.
-          const currentImgX = image.x;
-          const currentImgY = image.y;
-          const currentImgW = image.width;
-          const currentImgH = image.height;
+      const updateFunc = elementType === 'image' ? setImages : setRectangles;
+
+      updateFunc(prevElements => prevElements.map((element, index) => {
+        if (index === elementIndex) {
+          let nX = element.x;
+          let nY = element.y;
+          let nW = element.width;
+          let nH = element.height;
+          // Aspect ratio for images, free resize for rectangles by default for now
+          // Can add Shift key for aspect ratio for rectangles later if needed
+          const originalAspectRatio = elementType === 'image' ? element.originalWidth / element.originalHeight : 0;
+
+          // Store the element's state *before* this resize operation for anchor calculations.
+          const currentX = element.x;
+          const currentY = element.y;
+          const currentW = element.width;
+          const currentH = element.height;
 
           if (isShiftPressed && ['nw', 'ne', 'sw', 'se'].includes(resizeHandle)) {
             // Aspect ratio locked resize for corner handles
             switch (resizeHandle) {
               case 'se': { // Anchor: top-left
-                const anchorX = currentImgX;
-                const anchorY = currentImgY;
+                const anchorX = currentX;
+                const anchorY = currentY;
                 let targetW = x - anchorX;
                 let targetH = y - anchorY;
                 if (originalAspectRatio === 0) { // Avoid division by zero, treat as free resize
@@ -305,8 +611,8 @@ const ThumbnailEditor = () => {
                 break;
               }
               case 'sw': { // Anchor: top-right
-                const anchorX = currentImgX + currentImgW;
-                const anchorY = currentImgY;
+                const anchorX = currentX + currentW;
+                const anchorY = currentY;
                 let targetW = anchorX - x;
                 let targetH = y - anchorY;
                 if (originalAspectRatio === 0) {
@@ -324,8 +630,8 @@ const ThumbnailEditor = () => {
                 break;
               }
               case 'ne': { // Anchor: bottom-left
-                const anchorX = currentImgX;
-                const anchorY = currentImgY + currentImgH;
+                const anchorX = currentX;
+                const anchorY = currentY + currentH;
                 let targetW = x - anchorX;
                 let targetH = anchorY - y;
                  if (originalAspectRatio === 0) {
@@ -343,8 +649,8 @@ const ThumbnailEditor = () => {
                 break;
               }
               case 'nw': { // Anchor: bottom-right
-                const anchorX = currentImgX + currentImgW;
-                const anchorY = currentImgY + currentImgH;
+                const anchorX = currentX + currentW;
+                const anchorY = currentY + currentH;
                 let targetW = anchorX - x;
                 let targetH = anchorY - y;
                 if (originalAspectRatio === 0) {
@@ -399,70 +705,70 @@ const ThumbnailEditor = () => {
             // Recalculate positions based on the *final* clamped nW, nH
             switch (resizeHandle) {
                 case 'se':
-                    nX = currentImgX; nY = currentImgY;
+                    nX = currentX; nY = currentY;
                     break;
                 case 'sw':
-                    nX = (currentImgX + currentImgW) - nW; nY = currentImgY;
+                    nX = (currentX + currentW) - nW; nY = currentY;
                     break;
                 case 'ne':
-                    nX = currentImgX; nY = (currentImgY + currentImgH) - nH;
+                    nX = currentX; nY = (currentY + currentH) - nH;
                     break;
                 case 'nw':
-                    nX = (currentImgX + currentImgW) - nW; nY = (currentImgY + currentImgH) - nH;
+                    nX = (currentX + currentW) - nW; nY = (currentY + currentH) - nH;
                     break;
             }
 
           } else { // (no shift, or edge handles)
             switch (resizeHandle) {
               case 'se':
-                nW = Math.max(20, x - currentImgX);
-                nH = Math.max(20, y - currentImgY);
+                nW = Math.max(20, x - currentX);
+                nH = Math.max(20, y - currentY);
                 break;
               case 'sw':
-                nW = Math.max(20, currentImgX + currentImgW - x);
-                nH = Math.max(20, y - currentImgY);
+                nW = Math.max(20, currentX + currentW - x);
+                nH = Math.max(20, y - currentY);
                 nX = x;
                 break;
               case 'ne':
-                nW = Math.max(20, x - currentImgX);
-                nH = Math.max(20, currentImgY + currentImgH - y);
+                nW = Math.max(20, x - currentX);
+                nH = Math.max(20, currentY + currentH - y);
                 nY = y;
                 break;
               case 'nw':
-                nW = Math.max(20, currentImgX + currentImgW - x);
-                nH = Math.max(20, currentImgY + currentImgH - y);
+                nW = Math.max(20, currentX + currentW - x);
+                nH = Math.max(20, currentY + currentH - y);
                 nX = x;
                 nY = y;
                 break;
               case 'e':
-                nW = Math.max(20, x - currentImgX);
-                nH = currentImgH;
-                nX = currentImgX;
-                nY = currentImgY;
+                nW = Math.max(20, x - currentX);
+                nH = currentH;
+                nX = currentX;
+                nY = currentY;
                 break;
               case 'w':
-                nW = Math.max(20, currentImgX + currentImgW - x);
+                nW = Math.max(20, currentX + currentW - x);
                 nX = x;
-                nH = currentImgH;
-                nY = currentImgY;
+                nH = currentH;
+                nY = currentY;
                 break;
               case 'n':
-                nH = Math.max(20, currentImgY + currentImgH - y);
+                nH = Math.max(20, currentY + currentH - y);
                 nY = y;
-                nW = currentImgW;
-                nX = currentImgX;
+                nW = currentW;
+                nX = currentX;
                 break;
               case 's':
-                nH = Math.max(20, y - currentImgY);
-                nW = currentImgW;
-                nX = currentImgX;
-                nY = currentImgY;
+                nH = Math.max(20, y - currentY);
+                nW = currentW;
+                nX = currentX;
+                nY = currentY;
                 break;
             }
           }
-          return { ...image, x: nX, y: nY, width: nW, height: nH };
+          return { ...element, x: nX, y: nY, width: nW, height: nH };
         }
-        return image;
+        return element;
       }));
       return;
     }
@@ -481,6 +787,12 @@ const ThumbnailEditor = () => {
           ? { ...text, x: x - dragOffset.x, y: y - dragOffset.y }
           : text
       ));
+    } else if (draggedElement.type === 'rectangle') {
+      setRectangles(prev => prev.map((rectEl, index) =>
+        index === draggedElement.index
+          ? { ...rectEl, x: x - dragOffset.x, y: y - dragOffset.y }
+          : rectEl
+      ));
     }
   };
 
@@ -491,26 +803,33 @@ const ThumbnailEditor = () => {
     setResizeHandle(null);
   };
 
-  const addText = () => {
-    console.log('addText function called!', newText.trim());
+  const handleSaveText = () => {
     if (newText.trim()) {
+      // Editing existing text is handled by the inline editor's blur/enter.
       const newTextObj = {
         id: Date.now() + Math.random(),
         content: newText,
-        x: DISPLAY_WIDTH / 2 - 50,
-        y: DISPLAY_HEIGHT / 2,
-        style: { ...textStyle }
+        x: newTextPosition.x, // Use stored x position
+        y: newTextPosition.y, // Use stored y position
+        style: { ...textStyle } // textStyle is from the dialog state
       };
-      console.log('Adding text object:', newTextObj);
-      setTexts(prev => {
-        const updated = [...prev, newTextObj];
-        console.log('Updated texts array:', updated);
-        return updated;
-      });
+      setTexts(prev => [...prev, newTextObj]);
       setShowTextDialog(false);
       setNewText('');
+      setEditingTextIndex(null); 
+      setTextStyle({ fontSize: 24, fontFamily: 'Arial', color: '#000000', fontWeight: 'normal', fontStyle: 'normal' });
     } else {
-      console.log('No text to add - empty input');
+      console.log('No text to save - empty input');
+    }
+  };
+
+  const updateSelectedRectangle = (property, value) => {
+    if (selectedElement && selectedElement.type === 'rectangle') {
+      setRectangles(prev => prev.map((rect, index) => 
+        index === selectedElement.index 
+          ? { ...rect, [property]: value }
+          : rect
+      ));
     }
   };
 
@@ -534,7 +853,8 @@ const ThumbnailEditor = () => {
     const scaleX = EXPORT_WIDTH / DISPLAY_WIDTH;
     const scaleY = EXPORT_HEIGHT / DISPLAY_HEIGHT;
     
-    ctx.fillStyle = '#ffffff';
+    const exportBgStyle = parseCanvasGradient(ctx, backgroundConfig, EXPORT_WIDTH, EXPORT_HEIGHT);
+    ctx.fillStyle = exportBgStyle;
     ctx.fillRect(0, 0, EXPORT_WIDTH, EXPORT_HEIGHT);
     
     images.forEach(img => {
@@ -549,6 +869,40 @@ const ThumbnailEditor = () => {
       }
     });
     
+    // Draw rectangles before text for correct layering in export
+    rectangles.forEach(rectEl => {
+      // Draw rectangle on export canvas
+      ctx.fillStyle = rectEl.backgroundColor;
+      ctx.strokeStyle = rectEl.borderColor;
+      ctx.lineWidth = rectEl.borderWidth * scaleX; // Scale border width too
+
+      const scaledX = rectEl.x * scaleX;
+      const scaledY = rectEl.y * scaleY;
+      const scaledW = rectEl.width * scaleX;
+      const scaledH = rectEl.height * scaleY;
+      const scaledR = rectEl.borderRadius * scaleX; // Scale border radius
+
+      ctx.beginPath();
+      if (scaledR > 0) {
+        ctx.moveTo(scaledX + scaledR, scaledY);
+        ctx.arcTo(scaledX + scaledW, scaledY, scaledX + scaledW, scaledY + scaledH, scaledR);
+        ctx.arcTo(scaledX + scaledW, scaledY + scaledH, scaledX, scaledY + scaledH, scaledR);
+        ctx.arcTo(scaledX, scaledY + scaledH, scaledX, scaledY, scaledR);
+        ctx.arcTo(scaledX, scaledY, scaledX + scaledW, scaledY, scaledR);
+      } else {
+        ctx.rect(scaledX, scaledY, scaledW, scaledH);
+      }
+      ctx.closePath();
+      
+      if (rectEl.backgroundColor && rectEl.backgroundColor !== 'transparent') { // check for transparent
+        ctx.fill();
+      }
+      if (rectEl.borderWidth > 0 && rectEl.borderColor) {
+        ctx.stroke();
+      }
+    });
+
+    // Draw texts last to ensure they are on top in export
     texts.forEach(text => {
       ctx.font = `${text.style.fontStyle} ${text.style.fontWeight} ${text.style.fontSize * scaleX}px ${text.style.fontFamily}`;
       ctx.fillStyle = text.style.color;
@@ -570,6 +924,7 @@ const ThumbnailEditor = () => {
   const clearCanvas = () => {
     setImages([]);
     setTexts([]);
+    setRectangles([]);
     setSelectedElement(null);
   };
 
@@ -579,15 +934,18 @@ const ThumbnailEditor = () => {
         setImages(prev => prev.filter((_, index) => index !== selectedElement.index));
       } else if (selectedElement.type === 'text') {
         setTexts(prev => prev.filter((_, index) => index !== selectedElement.index));
+      } else if (selectedElement.type === 'rectangle') {
+        setRectangles(prev => prev.filter((_, index) => index !== selectedElement.index));
       }
       setSelectedElement(null);
     }
   };
 
-  const PreviewDisplay = () => {
+  const PreviewDisplay = React.memo(({ images, texts, rectangles, backgroundConfig }) => {
     const previewCanvasRef = useRef(null);
 
     useEffect(() => {
+      let isMounted = true; // Flag to track mounted status for async operations
       const canvas = previewCanvasRef.current;
       if (!canvas) return;
 
@@ -595,6 +953,8 @@ const ThumbnailEditor = () => {
       const taxiImg = new Image();
       
       taxiImg.onload = () => {
+        if (!isMounted) return; // Don't proceed if component unmounted or effect re-ran
+
         // --- Stage 1: Draw the taxi image --- 
         const canvasWidth = canvas.width; // 400
         const canvasHeight = canvas.height; // 300
@@ -653,7 +1013,9 @@ const ThumbnailEditor = () => {
         const exportScaleX = EXPORT_WIDTH / DISPLAY_WIDTH;
         const exportScaleY = EXPORT_HEIGHT / DISPLAY_HEIGHT;
         
-        thumbCtx.fillStyle = '#ffffff';
+        // Background for thumbnail in preview
+        const thumbBgStyle = parseCanvasGradient(thumbCtx, backgroundConfig, EXPORT_WIDTH, EXPORT_HEIGHT);
+        thumbCtx.fillStyle = thumbBgStyle;
         thumbCtx.fillRect(0, 0, EXPORT_WIDTH, EXPORT_HEIGHT);
         
         images.forEach(img => {
@@ -668,6 +1030,39 @@ const ThumbnailEditor = () => {
           }
         });
         
+        // Draw rectangles before text
+        rectangles.forEach(rectEl => {
+          thumbCtx.fillStyle = rectEl.backgroundColor;
+          thumbCtx.strokeStyle = rectEl.borderColor;
+          thumbCtx.lineWidth = rectEl.borderWidth * exportScaleX;
+          
+          const scaledX = rectEl.x * exportScaleX;
+          const scaledY = rectEl.y * exportScaleY;
+          const scaledW = rectEl.width * exportScaleX;
+          const scaledH = rectEl.height * exportScaleY;
+          const scaledR = rectEl.borderRadius * exportScaleX;
+
+          thumbCtx.beginPath();
+          if (scaledR > 0) {
+            thumbCtx.moveTo(scaledX + scaledR, scaledY);
+            thumbCtx.arcTo(scaledX + scaledW, scaledY, scaledX + scaledW, scaledY + scaledH, scaledR);
+            thumbCtx.arcTo(scaledX + scaledW, scaledY + scaledH, scaledX, scaledY + scaledH, scaledR);
+            thumbCtx.arcTo(scaledX, scaledY + scaledH, scaledX, scaledY, scaledR);
+            thumbCtx.arcTo(scaledX, scaledY, scaledX + scaledW, scaledY, scaledR);
+          } else {
+            thumbCtx.rect(scaledX, scaledY, scaledW, scaledH);
+          }
+          thumbCtx.closePath();
+          
+          if (rectEl.backgroundColor && rectEl.backgroundColor !== 'transparent') {
+            thumbCtx.fill();
+          }
+          if (rectEl.borderWidth > 0 && rectEl.borderColor) {
+            thumbCtx.stroke();
+          }
+        });
+
+        // Draw texts last to ensure they are on top
         texts.forEach(text => {
           thumbCtx.font = `${text.style.fontStyle} ${text.style.fontWeight} ${text.style.fontSize * exportScaleX}px ${text.style.fontFamily}`;
           thumbCtx.fillStyle = text.style.color;
@@ -690,10 +1085,19 @@ const ThumbnailEditor = () => {
         
         // Draw the prepared 3:1 thumbnail onto the main preview canvas
         ctx.drawImage(thumbnailCanvas, finalThumbDrawX, finalThumbDrawY, finalThumbDrawW, finalThumbDrawH);
+
+        // Draw a border around the ad panel on the taxi image
+        ctx.strokeStyle = '#2563eb'; // blue-600 from Tailwind
+        ctx.lineWidth = 2; // A visible line width
+        ctx.strokeRect(finalThumbDrawX, finalThumbDrawY, finalThumbDrawW, finalThumbDrawH);
       };
       
       taxiImg.src = '/taxi.png';
-    }, [images, texts]);
+
+      return () => {
+        isMounted = false; // Cleanup: set flag to false when component unmounts or effect re-runs
+      };
+    }, [images, texts, rectangles, backgroundConfig]);
 
     return (
       <div className="p-4 bg-white rounded-lg shadow-md">
@@ -711,7 +1115,7 @@ const ThumbnailEditor = () => {
         </p>
       </div>
     );
-  };
+  });
 
   return (
     <div className="p-4 min-h-screen bg-gray-100">
@@ -747,6 +1151,16 @@ const ThumbnailEditor = () => {
                   >
                     Add Text
                   </button>
+                  <button
+                    onClick={() => setSelectedTool('rectangle')}
+                    className={`px-4 py-2 rounded-md transition-colors ${
+                      selectedTool === 'rectangle' 
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Add Rectangle
+                  </button>
                 </div>
                 
                 <div className="w-px h-6 bg-gray-300"></div>
@@ -762,6 +1176,223 @@ const ThumbnailEditor = () => {
                     <option value="jpeg">JPEG</option>
                   </select>
                 </div>
+
+                <div className="w-px h-6 bg-gray-300"></div>
+
+                <div className="flex gap-2 items-center">
+                  <label htmlFor="bgColorPicker" className="text-sm font-medium text-gray-700">BG Color:</label>
+                  <input 
+                    type="color" 
+                    id="bgColorPicker"
+                    value={backgroundConfig.type === 'solid' ? backgroundConfig.colors[0].color : '#ffffff'}
+                    onChange={(e) => {
+                      setBackgroundConfig(prev => ({
+                        ...prev,
+                        type: 'solid',
+                        colors: [{ ...prev.colors[0], color: e.target.value, stop:0 }]
+                      }));
+                    }}
+                    className="p-0 w-8 h-8 rounded-md border border-gray-300 cursor-pointer"
+                    title="Select solid background color"
+                    disabled={backgroundConfig.type !== 'solid'}
+                  />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <label htmlFor="bgTypePicker" className="text-sm font-medium text-gray-700">BG Type:</label>
+                  <select
+                    id="bgTypePicker"
+                    value={backgroundConfig.type}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      setBackgroundConfig(prev => ({
+                        ...prev,
+                        type: newType,
+                        // Reset colors or angle based on type? For now, keep them.
+                        // If switching to solid, ensure first color is primary.
+                        colors: newType === 'solid' && prev.colors.length === 0 ? 
+                                [{ id: Date.now(), color: '#ffffff', stop: 0 }] : 
+                                (newType === 'solid' && prev.colors.length > 0 ? 
+                                  [{ ...prev.colors[0], stop:0 }] : prev.colors),
+                      }));
+                    }}
+                    className="px-3 py-1 text-sm rounded-md border border-gray-300"
+                  >
+                    <option value="solid">Solid Color</option>
+                    <option value="linear">Linear Gradient</option>
+                    <option value="radial">Radial Gradient</option>
+                  </select>
+                </div>
+
+                {/* Dynamic controls for Linear Gradient */} 
+                {backgroundConfig.type === 'linear' && (
+                  <div className="p-2 mt-2 space-y-2 rounded-md border">
+                    <div className="flex gap-2 items-center">
+                      <label className="text-xs">Angle:</label>
+                      <input 
+                        type="number" 
+                        value={backgroundConfig.angle}
+                        onChange={e => setBackgroundConfig(prev => ({...prev, angle: parseInt(e.target.value) || 0}))}
+                        className="px-1 py-0.5 w-20 text-xs rounded border"
+                      />
+                    </div>
+                    <div className="mb-1 text-xs">Color Stops:</div>
+                    {backgroundConfig.colors.map((stop, index) => (
+                      <div key={stop.id || index} className="flex gap-1 items-center">
+                        <input 
+                          type="color" 
+                          value={stop.color}
+                          onChange={e => {
+                            const newColors = [...backgroundConfig.colors];
+                            newColors[index] = {...newColors[index], color: e.target.value};
+                            setBackgroundConfig(prev => ({...prev, colors: newColors}));
+                          }}
+                          className="p-0 w-6 h-6 rounded border"
+                        />
+                        <input 
+                          type="number" 
+                          min="0" max="100" step="1"
+                          value={stop.stop}
+                          onChange={e => {
+                            const newColors = [...backgroundConfig.colors];
+                            newColors[index] = {...newColors[index], stop: parseInt(e.target.value)};
+                            setBackgroundConfig(prev => ({...prev, colors: newColors}));
+                          }}
+                          className="px-1 py-0.5 w-12 text-xs rounded border"
+                        />
+                        <span>%</span>
+                        {backgroundConfig.colors.length > 1 && (
+                           <button 
+                            onClick={() => {
+                              const newColors = backgroundConfig.colors.filter((_, i) => i !== index);
+                              setBackgroundConfig(prev => ({...prev, colors: newColors.length > 0 ? newColors : initialBackgroundConfig.colors})); // Ensure at least one color stop or reset
+                            }}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button 
+                      onClick={() => {
+                        const newStopPosition = backgroundConfig.colors.length > 0 ? 
+                                                Math.min(100, (backgroundConfig.colors[backgroundConfig.colors.length-1].stop || 0) + 10) :
+                                                0;
+                        setBackgroundConfig(prev => ({
+                          ...prev, 
+                          colors: [...prev.colors, {id: Date.now(), color: '#000000', stop: newStopPosition}]
+                        }));
+                      }}
+                      className="px-2 py-0.5 text-xs text-white bg-blue-500 rounded hover:bg-blue-600"
+                    >
+                      Add Color Stop
+                    </button>
+                  </div>
+                )}
+                
+                {/* Dynamic controls for Radial Gradient */} 
+                {backgroundConfig.type === 'radial' && (
+                  <div className="p-2 mt-2 space-y-2 rounded-md border">
+                    <div className="grid grid-cols-2 gap-y-1 gap-x-2">
+                      <div>
+                        <label className="text-xs">Shape:</label>
+                        <select 
+                          value={backgroundConfig.radialShape}
+                          onChange={e => setBackgroundConfig(prev => ({...prev, radialShape: e.target.value}))}
+                          className="px-1 py-0.5 w-full text-xs rounded border"
+                        >
+                          <option value="ellipse">Ellipse</option>
+                          <option value="circle">Circle</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs">Extent:</label>
+                        <select 
+                          value={backgroundConfig.radialExtent}
+                          onChange={e => setBackgroundConfig(prev => ({...prev, radialExtent: e.target.value}))}
+                          className="px-1 py-0.5 w-full text-xs rounded border"
+                        >
+                          <option value="farthest-corner">Farthest Corner</option>
+                          <option value="farthest-side">Farthest Side</option>
+                          <option value="closest-corner">Closest Corner</option>
+                          <option value="closest-side">Closest Side</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs">Center X (%):</label>
+                        <input 
+                          type="text" // Using text to allow % sign, parsing will be needed
+                          value={backgroundConfig.radialCenterX}
+                          onChange={e => setBackgroundConfig(prev => ({...prev, radialCenterX: e.target.value}))}
+                          className="px-1 py-0.5 w-full text-xs rounded border"
+                          placeholder="e.g. 50%"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs">Center Y (%):</label>
+                        <input 
+                          type="text" 
+                          value={backgroundConfig.radialCenterY}
+                          onChange={e => setBackgroundConfig(prev => ({...prev, radialCenterY: e.target.value}))}
+                          className="px-1 py-0.5 w-full text-xs rounded border"
+                          placeholder="e.g. 50%"
+                        />
+                      </div>
+                    </div>
+                    <div className="pt-1 mt-2 mb-1 text-xs border-t">Color Stops:</div>
+                    {backgroundConfig.colors.map((stop, index) => (
+                      <div key={stop.id || index} className="flex gap-1 items-center">
+                        <input 
+                          type="color" 
+                          value={stop.color}
+                          onChange={e => {
+                            const newColors = [...backgroundConfig.colors];
+                            newColors[index] = {...newColors[index], color: e.target.value};
+                            setBackgroundConfig(prev => ({...prev, colors: newColors}));
+                          }}
+                          className="p-0 w-6 h-6 rounded border"
+                        />
+                        <input 
+                          type="number" 
+                          min="0" max="100" step="1"
+                          value={stop.stop}
+                          onChange={e => {
+                            const newColors = [...backgroundConfig.colors];
+                            newColors[index] = {...newColors[index], stop: parseInt(e.target.value)};
+                            setBackgroundConfig(prev => ({...prev, colors: newColors}));
+                          }}
+                          className="px-1 py-0.5 w-12 text-xs rounded border"
+                        />
+                        <span>%</span>
+                        {backgroundConfig.colors.length > 1 && (
+                           <button 
+                            onClick={() => {
+                              const newColors = backgroundConfig.colors.filter((_, i) => i !== index);
+                              setBackgroundConfig(prev => ({...prev, colors: newColors.length > 0 ? newColors : initialBackgroundConfig.colors}));
+                            }}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button 
+                      onClick={() => {
+                        const newStopPosition = backgroundConfig.colors.length > 0 ? 
+                                                Math.min(100, (backgroundConfig.colors[backgroundConfig.colors.length-1].stop || 0) + 10) :
+                                                0;
+                        setBackgroundConfig(prev => ({
+                          ...prev, 
+                          colors: [...prev.colors, {id: Date.now(), color: '#000000', stop: newStopPosition}]
+                        }));
+                      }}
+                      className="px-2 py-0.5 mt-1 text-xs text-white bg-blue-500 rounded hover:bg-blue-600"
+                    >
+                      Add Color Stop
+                    </button>
+                  </div>
+                )}
                 
                 <div className="flex gap-2 ml-auto">
                   <button
@@ -815,7 +1446,28 @@ const ThumbnailEditor = () => {
                     onMouseMove={handleCanvasMouseMove}
                     onMouseUp={handleCanvasMouseUp}
                     onMouseLeave={handleCanvasMouseUp}
+                    onDoubleClick={handleCanvasDoubleClick}
                   />
+                  {editingTextIndex !== null && texts[editingTextIndex] && (
+                    <InlineTextEditor
+                      textElement={texts[editingTextIndex]}
+                      value={inlineInputValue}
+                      onChange={(newValue) => {
+                        setInlineInputValue(newValue);
+                        setTexts(prevTexts =>
+                          prevTexts.map((txt, idx) =>
+                            idx === editingTextIndex ? { ...txt, content: newValue } : txt
+                          )
+                        );
+                      }}
+                      onStyleChange={(property, Pvalue) => {
+                        // This would be triggered if InlineTextEditor had its own style controls
+                        // For now, sidebar controls call updateSelectedText directly
+                      }}
+                      onCommit={() => setEditingTextIndex(null)}
+                      canvasRef={canvasRef}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -824,11 +1476,11 @@ const ThumbnailEditor = () => {
           {/* Right Sidebar */}
           <div className="space-y-6">
             {/* Preview Display */}
-            <PreviewDisplay />
+            <PreviewDisplay images={images} texts={texts} rectangles={rectangles} backgroundConfig={backgroundConfig} />
 
             {/* Text Edit Controls */}
             {selectedElement && selectedElement.type === 'text' && (
-              <div className="p-4 bg-white rounded-lg shadow-md">
+              <div className="p-4 bg-white rounded-lg shadow-md text-style-control-panel">
                 <h3 className="mb-3 text-lg font-semibold">Edit Text</h3>
                 
                 <div className="space-y-4">
@@ -918,6 +1570,9 @@ const ThumbnailEditor = () => {
                     • Drag edge handles to resize in one direction
                   </p>
                   <p className="text-sm text-gray-600">
+                    • Hold Shift + drag corner to maintain aspect ratio
+                  </p>
+                  <p className="text-sm text-gray-600">
                     • Drag image to reposition
                   </p>
                   <button
@@ -938,6 +1593,96 @@ const ThumbnailEditor = () => {
               </div>
             )}
 
+            {/* Rectangle Edit Controls */}
+            {selectedElement && selectedElement.type === 'rectangle' && (
+              <div className="p-4 bg-white rounded-lg shadow-md">
+                <h3 className="mb-3 text-lg font-semibold">Edit Rectangle</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block mb-1 text-sm font-medium text-gray-700">Background Color</label>
+                    <input
+                      type="color"
+                      value={rectangles[selectedElement.index]?.backgroundColor || '#cccccc'}
+                      onChange={(e) => updateSelectedRectangle('backgroundColor', e.target.value)}
+                      className="px-3 py-2 w-full h-10 rounded-md border border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-sm font-medium text-gray-700">Border Color</label>
+                    <input
+                      type="color"
+                      value={rectangles[selectedElement.index]?.borderColor || '#333333'}
+                      onChange={(e) => updateSelectedRectangle('borderColor', e.target.value)}
+                      className="px-3 py-2 w-full h-10 rounded-md border border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-sm font-medium text-gray-700">Border Width (px)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50" // Arbitrary max, adjust as needed
+                      value={rectangles[selectedElement.index]?.borderWidth || 0}
+                      onChange={(e) => updateSelectedRectangle('borderWidth', parseInt(e.target.value) || 0)}
+                      className="px-3 py-2 w-full rounded-md border border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-sm font-medium text-gray-700">Border Radius (px)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      // Max radius could be half of the smallest dimension, but for simplicity a fixed max here
+                      max="100" // Arbitrary max, adjust as needed
+                      value={rectangles[selectedElement.index]?.borderRadius || 0}
+                      onChange={(e) => updateSelectedRectangle('borderRadius', parseInt(e.target.value) || 0)}
+                      className="px-3 py-2 w-full rounded-md border border-gray-300"
+                    />
+                  </div>
+
+                  <div className="pt-3 mt-3 border-t">
+                    <p className="mb-2 text-sm text-gray-600">
+                      • Drag corner handles to resize (Hold Shift to maintain aspect ratio)
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      • Drag edge handles to resize in one direction
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      • Drag rectangle to reposition
+                    </p>
+                     <button
+                      onClick={() => {
+                        if (!selectedElement || selectedElement.type !== 'rectangle') return;
+                        const rect = rectangles[selectedElement.index];
+                        const aspectRatio = rect.originalWidth / rect.originalHeight;
+                        // Choose the larger dimension to scale from to avoid making it too small initially
+                        let newWidth, newHeight;
+                        if (rect.width / aspectRatio <= rect.height) { // Current shape is taller or same as original aspect
+                            newWidth = rect.height * aspectRatio;
+                            newHeight = rect.height;
+                        } else { // Current shape is wider than original aspect
+                            newHeight = rect.width / aspectRatio;
+                            newWidth = rect.width;
+                        }
+                        // Ensure minimum size for both dimensions after aspect ratio reset
+                        newWidth = Math.max(20, newWidth);
+                        newHeight = Math.max(20, newHeight);
+                        if (newWidth / aspectRatio < 20) newHeight = 20 / aspectRatio;
+                        if (newHeight * aspectRatio < 20) newWidth = 20 * aspectRatio;
+
+                        updateSelectedRectangle('width', newWidth);
+                        updateSelectedRectangle('height', newHeight);
+                      }}
+                      className="px-4 py-2 mt-2 w-full text-white bg-blue-500 rounded-md transition-colors hover:bg-blue-600"
+                    >
+                      Reset Aspect Ratio (to original drop size)
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
             {/* Element Info */}
             <div className="p-4 bg-white rounded-lg shadow-md">
               <h3 className="mb-3 text-lg font-semibold">Selection Info</h3>
@@ -947,6 +1692,13 @@ const ThumbnailEditor = () => {
                   <p>Index: {selectedElement.index}</p>
                   {selectedElement.type === 'text' && (
                     <p>Content: "{texts[selectedElement.index]?.content}"</p>
+                  )}
+                  {selectedElement.type === 'rectangle' && (
+                    <>
+                      <p>Bg: {rectangles[selectedElement.index]?.backgroundColor}</p>
+                      <p>Border: {rectangles[selectedElement.index]?.borderColor} ({rectangles[selectedElement.index]?.borderWidth}px)</p>
+                      <p>Radius: {rectangles[selectedElement.index]?.borderRadius}px</p>
+                    </>
                   )}
                 </div>
               ) : (
@@ -964,6 +1716,7 @@ const ThumbnailEditor = () => {
               // Only close if clicking the backdrop, not the modal content
               if (e.target === e.currentTarget) {
                 setShowTextDialog(false);
+                setEditingTextIndex(null);
               }
             }}
           >
@@ -1059,16 +1812,20 @@ const ThumbnailEditor = () => {
               <div className="flex gap-2 justify-end mt-6">
                 <button
                   type="button"
-                  onClick={() => setShowTextDialog(false)}
+                  onClick={() => {
+                    setShowTextDialog(false);
+                    setEditingTextIndex(null);
+                  }}
                   className="px-4 py-2 text-gray-600 rounded-md border border-gray-300 hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={addText}
+                  onClick={handleSaveText}
                   className="px-4 py-2 text-white bg-blue-500 rounded-md hover:bg-blue-600"
                 >
+                  {/* Dialog is now only for adding new text */}
                   Add Text
                 </button>
               </div>
@@ -1077,6 +1834,138 @@ const ThumbnailEditor = () => {
         )}
       </div>
     </div>
+  );
+};
+
+const InlineTextEditor = ({ textElement, value, onChange, onCommit, canvasRef }) => {
+  const inputRef = useRef(null);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [style, setStyle] = useState({});
+  const [isReadyToRender, setIsReadyToRender] = useState(false);
+  const lastSelectedIdRef = useRef(null);
+
+  const measureTextMetrics = (text, fontString) => {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return { width: 0, ascent: 0, descent: 0 };
+    context.font = fontString;
+    const metrics = context.measureText(text);
+    const ascent = (typeof metrics.actualBoundingBoxAscent === 'number' && isFinite(metrics.actualBoundingBoxAscent)) 
+                   ? metrics.actualBoundingBoxAscent 
+                   : parseFloat(fontString.match(/(\d+)px/)?.[1] || '0') * 0.8; // Fallback to 80% of fontSize
+    const descent = (typeof metrics.actualBoundingBoxDescent === 'number' && isFinite(metrics.actualBoundingBoxDescent)) 
+                    ? metrics.actualBoundingBoxDescent 
+                    : parseFloat(fontString.match(/(\d+)px/)?.[1] || '0') * 0.2; // Fallback to 20% of fontSize
+    return {
+      width: metrics.width,
+      ascent: ascent,
+      descent: descent,
+    };
+  };
+
+  useEffect(() => {
+    if (textElement && canvasRef.current) {
+      const canvasRect = canvasRef.current.getBoundingClientRect();
+      const textStyle = textElement.style;
+      const fullFontString = `${textStyle.fontStyle} ${textStyle.fontWeight} ${textStyle.fontSize}px ${textStyle.fontFamily}`;
+
+      const metrics = measureTextMetrics(value || ' ', fullFontString);
+      const boxHeight = metrics.ascent + metrics.descent;
+      const topPosition = textElement.y - metrics.ascent;
+
+      // Define padding values
+      const horizontalPadding = 5; // 5px on left and right
+      const verticalPadding = 1;   // 1px on top and bottom
+
+      setPosition({
+        // Adjust left and top position to account for the INSET border of the input
+        // The border is 1px, so we shift slightly to align the *inside* of the input with canvas text
+        top: canvasRect.top + topPosition - verticalPadding - 1, // -1 for top border
+        left: canvasRect.left + textElement.x - horizontalPadding - 1, // -1 for left border
+      });
+
+      setStyle({
+        position: 'absolute',
+        zIndex: 100,
+        fontFamily: textStyle.fontFamily,
+        fontSize: `${textStyle.fontSize}px`,
+        color: textStyle.color,
+        fontWeight: textStyle.fontWeight,
+        fontStyle: textStyle.fontStyle,
+        lineHeight: `${boxHeight}px`, // Text itself is aligned using this
+        height: `${boxHeight + (2 * verticalPadding)}px`,    // Total height including vertical padding
+        width: `${metrics.width + (2 * horizontalPadding)}px`, // Total width including horizontal padding
+        background: 'rgba(255, 255, 255, 0.9)',
+        border: '1px dashed #2563eb',
+        padding: `${verticalPadding}px ${horizontalPadding}px`, // Apply padding
+        margin: '0',
+        boxSizing: 'border-box',
+        outline: 'none',
+        textAlign: 'left',
+      });
+      setIsReadyToRender(true); // Ready to render after calculations
+
+      if (inputRef.current) {
+        inputRef.current.focus();
+        if (textElement.id !== lastSelectedIdRef.current) {
+          inputRef.current.select();
+          lastSelectedIdRef.current = textElement.id;
+        }
+      }
+    } else {
+      lastSelectedIdRef.current = null;
+    }
+  // Dependencies now include all style properties that affect geometry or appearance
+  }, [textElement, canvasRef, value, 
+      textElement?.style.fontFamily, textElement?.style.fontSize, textElement?.style.color, 
+      textElement?.style.fontWeight, textElement?.style.fontStyle]);
+
+  const handleInputChange = (e) => {
+    onChange(e.target.value);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      setIsReadyToRender(false);
+      onCommit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsReadyToRender(false);
+      onCommit();
+    }
+  };
+
+  const handleBlur = (e) => {
+    const newFocusTarget = e.relatedTarget;
+    if (newFocusTarget && newFocusTarget.closest && newFocusTarget.closest('.text-style-control-panel')) {
+      return;
+    }
+    setIsReadyToRender(false);
+    onCommit();
+  };
+  
+  // Do not render until calculations are done and textElement is present
+  if (!isReadyToRender || !textElement) {
+    // When hiding, ensure isReadyToRender is false for the *next* time it might appear
+    // This is mostly handled by onCommit/onBlur setting it false, but good to be defensive.
+    if (isReadyToRender && !textElement && inputRef.current) {
+        // This case should ideally not happen if parent manages textElement correctly with editingTextIndex
+    }
+    return null;
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={value}
+      onChange={handleInputChange}
+      onKeyDown={handleKeyDown}
+      onBlur={handleBlur}
+      style={{ ...style, top: `${position.top}px`, left: `${position.left}px` }}
+      autoFocus
+    />
   );
 };
 
