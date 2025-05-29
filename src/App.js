@@ -1197,7 +1197,34 @@ const ThumbnailEditor = () => {
                     disabled={backgroundConfig.type !== 'solid'}
                   />
                 </div>
-                <div className="flex gap-2 items-center">
+                
+                <div className="flex gap-2 mr-auto">
+                  <button
+                    onClick={deleteSelected}
+                    disabled={!selectedElement}
+                    className={`px-4 py-2 rounded-md transition-colors ${
+                      selectedElement 
+                        ? 'text-white bg-red-500 hover:bg-red-600' 
+                        : 'text-gray-500 bg-gray-300 cursor-not-allowed'
+                    }`}
+                  >
+                    Delete Selected
+                  </button>
+                  <button
+                    onClick={clearCanvas}
+                    className="px-4 py-2 text-white bg-gray-500 rounded-md transition-colors hover:bg-gray-600"
+                  >
+                    Clear All
+                  </button>
+                  <button
+                    onClick={exportCanvas}
+                    className="px-4 py-2 text-white bg-green-500 rounded-md transition-colors hover:bg-green-600"
+                  >
+                    Export 384×128
+                  </button>
+                </div>
+
+                <div className="flex gap-2 items-center w-full">
                   <label htmlFor="bgTypePicker" className="text-sm font-medium text-gray-700">BG Type:</label>
                   <select
                     id="bgTypePicker"
@@ -1393,32 +1420,6 @@ const ThumbnailEditor = () => {
                     </button>
                   </div>
                 )}
-                
-                <div className="flex gap-2 ml-auto">
-                  <button
-                    onClick={deleteSelected}
-                    disabled={!selectedElement}
-                    className={`px-4 py-2 rounded-md transition-colors ${
-                      selectedElement 
-                        ? 'text-white bg-red-500 hover:bg-red-600' 
-                        : 'text-gray-500 bg-gray-300 cursor-not-allowed'
-                    }`}
-                  >
-                    Delete Selected
-                  </button>
-                  <button
-                    onClick={clearCanvas}
-                    className="px-4 py-2 text-white bg-gray-500 rounded-md transition-colors hover:bg-gray-600"
-                  >
-                    Clear All
-                  </button>
-                  <button
-                    onClick={exportCanvas}
-                    className="px-4 py-2 text-white bg-green-500 rounded-md transition-colors hover:bg-green-600"
-                  >
-                    Export 384×128
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -1481,19 +1482,20 @@ const ThumbnailEditor = () => {
             {/* Text Edit Controls */}
             {selectedElement && selectedElement.type === 'text' && (
               <div className="p-4 bg-white rounded-lg shadow-md text-style-control-panel">
-                <h3 className="mb-3 text-lg font-semibold">Edit Text</h3>
+                <h3 className="mb-4 text-lg font-semibold">Edit Text</h3>
                 
                 <div className="space-y-4">
+                  {/* Font Size */}
                   <div>
-                    <label className="block mb-2 text-sm font-medium text-gray-700">Font Size</label>
-                    <div className="space-y-2">
+                    <label className="block mb-1 text-sm font-medium text-gray-700">Font Size</label>
+                    <div className="flex gap-3 items-center">
                       <input
                         type="range"
                         min="8"
                         max="72"
                         value={texts[selectedElement.index]?.style.fontSize || 24}
                         onChange={(e) => updateSelectedText('fontSize', parseInt(e.target.value))}
-                        className="w-full"
+                        className="w-full h-5 cursor-pointer accent-blue-500"
                       />
                       <input
                         type="number"
@@ -1501,27 +1503,19 @@ const ThumbnailEditor = () => {
                         max="72"
                         value={texts[selectedElement.index]?.style.fontSize || 24}
                         onChange={(e) => updateSelectedText('fontSize', parseInt(e.target.value))}
-                        className="px-3 py-2 w-full rounded-md border border-gray-300"
+                        className="px-2 py-1 w-20 text-sm text-center rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                   </div>
-                  
+
+                  {/* Font Family */} 
                   <div>
-                    <label className="block mb-2 text-sm font-medium text-gray-700">Color</label>
-                    <input
-                      type="color"
-                      value={texts[selectedElement.index]?.style.color || '#000000'}
-                      onChange={(e) => updateSelectedText('color', e.target.value)}
-                      className="px-3 py-2 w-full h-10 rounded-md border border-gray-300"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block mb-2 text-sm font-medium text-gray-700">Font Family</label>
+                    <label htmlFor={`textFontFamily-${selectedElement.index}`} className="block mb-1 text-sm font-medium text-gray-700">Font Family</label>
                     <select
+                      id={`textFontFamily-${selectedElement.index}`}
                       value={texts[selectedElement.index]?.style.fontFamily || 'Arial'}
                       onChange={(e) => updateSelectedText('fontFamily', e.target.value)}
-                      className="px-3 py-2 w-full rounded-md border border-gray-300"
+                      className="px-3 py-2 w-full text-sm rounded-md border border-gray-300 cursor-pointer focus:ring-blue-500 focus:border-blue-500"
                     >
                       <option value="Arial">Arial</option>
                       <option value="Georgia">Georgia</option>
@@ -1533,26 +1527,42 @@ const ThumbnailEditor = () => {
                     </select>
                   </div>
                   
-                  <div className="flex gap-2">
-                    <label className="flex items-center">
+                  {/* Color and Styles */}
+                  <div className="grid grid-cols-[auto,1fr] gap-x-6 items-center">
+                    {/* Column 1: Color Picker Area */} 
+                    <div>
+                      <label htmlFor={`textColorPicker-${selectedElement.index}`} className="block mb-1 text-sm font-medium text-gray-700">Color</label>
                       <input
-                        type="checkbox"
-                        checked={texts[selectedElement.index]?.style.fontWeight === 'bold'}
-                        onChange={(e) => updateSelectedText('fontWeight', e.target.checked ? 'bold' : 'normal')}
-                        className="mr-2"
+                        id={`textColorPicker-${selectedElement.index}`}
+                        type="color"
+                        value={texts[selectedElement.index]?.style.color || '#000000'}
+                        onChange={(e) => updateSelectedText('color', e.target.value)}
+                        className="w-24 h-10 rounded-md border border-gray-300 cursor-pointer"
                       />
-                      Bold
-                    </label>
-                    
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={texts[selectedElement.index]?.style.fontStyle === 'italic'}
-                        onChange={(e) => updateSelectedText('fontStyle', e.target.checked ? 'italic' : 'normal')}
-                        className="mr-2"
-                      />
-                      Italic
-                    </label>
+                    </div>
+                    {/* Column 2: Style Toggles */} 
+                    <div className="flex flex-col space-y-1.5">
+                       {/* Invisible label for alignment with the "Color" label's vertical position */}
+                      <label className="block invisible mb-1 text-sm font-medium text-gray-700">Style</label>
+                      <label className="flex items-center text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={texts[selectedElement.index]?.style.fontWeight === 'bold'}
+                          onChange={(e) => updateSelectedText('fontWeight', e.target.checked ? 'bold' : 'normal')}
+                          className="mr-1.5 w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer focus:ring-offset-0 focus:ring-2 focus:ring-blue-500"
+                        />
+                        Bold
+                      </label>
+                      <label className="flex items-center text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={texts[selectedElement.index]?.style.fontStyle === 'italic'}
+                          onChange={(e) => updateSelectedText('fontStyle', e.target.checked ? 'italic' : 'normal')}
+                          className="mr-1.5 w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer focus:ring-offset-0 focus:ring-2 focus:ring-blue-500"
+                        />
+                        Italic
+                      </label>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1561,27 +1571,49 @@ const ThumbnailEditor = () => {
             {/* Image Edit Controls */}
             {selectedElement && selectedElement.type === 'image' && (
               <div className="p-4 bg-white rounded-lg shadow-md">
-                <h3 className="mb-3 text-lg font-semibold">Edit Image</h3>
+                <h3 className="mb-4 text-lg font-semibold">Edit Image</h3>
                 <div className="space-y-3">
-                  <p className="text-sm text-gray-600">
-                    • Drag corner handles to resize
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    • Drag edge handles to resize in one direction
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    • Hold Shift + drag corner to maintain aspect ratio
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    • Drag image to reposition
-                  </p>
+                  <ul className="space-y-1 text-sm list-disc list-inside text-left text-gray-600">
+                    <li>Drag corner handles to resize.</li>
+                    <li>Hold <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 rounded-sm border border-gray-300">Shift</kbd> to maintain aspect ratio with corner handles.</li>
+                    <li>Drag edge handles to resize in one direction.</li>
+                    <li>Drag image to reposition.</li>
+                  </ul>
                   <button
                     onClick={() => {
+                      if (!selectedElement || selectedElement.type !== 'image') return;
                       const img = images[selectedElement.index];
+                      if (!img || typeof img.originalWidth !== 'number' || typeof img.originalHeight !== 'number' || img.originalHeight === 0) return;
                       const aspectRatio = img.originalWidth / img.originalHeight;
+                      
+                      // Prioritize maintaining height if width would become too small, and vice-versa.
+                      // Or, if aspect ratio is extreme, it might try to make one dimension very large.
+                      // Let's base it on the current height as a starting point, but ensure it doesn't go below min width.
+                      let newHeight = img.height;
+                      let newWidth = newHeight * aspectRatio;
+
+                      if (newWidth < 20) { // If new width is too small
+                        newWidth = 20;
+                        newHeight = newWidth / aspectRatio;
+                        if (newHeight < 20 && aspectRatio !== 0) { // If height also becomes too small, adjust based on original intent
+                           newHeight = 20;
+                           newWidth = newHeight * aspectRatio; // This might still be < 20 if AR is extreme
+                           newWidth = Math.max(20, newWidth); // Final clamp
+                        } else if (aspectRatio === 0) { // Avoid division by zero if originalHeight was 0
+                           newHeight = Math.max(20, img.height); // Keep current height or min
+                        }
+                      }
+
+                      if (newHeight < 20) {
+                          newHeight = 20;
+                          if(aspectRatio !== 0) newWidth = newHeight * aspectRatio;
+                          else newWidth = Math.max(20, img.width); // Keep current width or min
+                          newWidth = Math.max(20, newWidth); // Final clamp
+                      }
+
                       setImages(prev => prev.map((image, index) => 
                         index === selectedElement.index 
-                          ? { ...image, width: image.height * aspectRatio }
+                          ? { ...image, width: Math.max(20, newWidth), height: Math.max(20, newHeight) }
                           : image
                       ));
                     }}
@@ -1596,60 +1628,56 @@ const ThumbnailEditor = () => {
             {/* Rectangle Edit Controls */}
             {selectedElement && selectedElement.type === 'rectangle' && (
               <div className="p-4 bg-white rounded-lg shadow-md">
-                <h3 className="mb-3 text-lg font-semibold">Edit Rectangle</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block mb-1 text-sm font-medium text-gray-700">Background Color</label>
-                    <input
-                      type="color"
-                      value={rectangles[selectedElement.index]?.backgroundColor || '#cccccc'}
-                      onChange={(e) => updateSelectedRectangle('backgroundColor', e.target.value)}
-                      className="px-3 py-2 w-full h-10 rounded-md border border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 text-sm font-medium text-gray-700">Border Color</label>
-                    <input
-                      type="color"
-                      value={rectangles[selectedElement.index]?.borderColor || '#333333'}
-                      onChange={(e) => updateSelectedRectangle('borderColor', e.target.value)}
-                      className="px-3 py-2 w-full h-10 rounded-md border border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 text-sm font-medium text-gray-700">Border Width (px)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="50" // Arbitrary max, adjust as needed
-                      value={rectangles[selectedElement.index]?.borderWidth || 0}
-                      onChange={(e) => updateSelectedRectangle('borderWidth', parseInt(e.target.value) || 0)}
-                      className="px-3 py-2 w-full rounded-md border border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 text-sm font-medium text-gray-700">Border Radius (px)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      // Max radius could be half of the smallest dimension, but for simplicity a fixed max here
-                      max="100" // Arbitrary max, adjust as needed
-                      value={rectangles[selectedElement.index]?.borderRadius || 0}
-                      onChange={(e) => updateSelectedRectangle('borderRadius', parseInt(e.target.value) || 0)}
-                      className="px-3 py-2 w-full rounded-md border border-gray-300"
-                    />
+                <h3 className="mb-4 text-lg font-semibold">Edit Rectangle</h3>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                    <div>
+                      <label className="block mb-1 text-sm font-medium text-gray-700">Background</label>
+                      <input
+                        type="color"
+                        value={rectangles[selectedElement.index]?.backgroundColor || '#cccccc'}
+                        onChange={(e) => updateSelectedRectangle('backgroundColor', e.target.value)}
+                        className="px-1 py-1 w-full h-10 rounded-md border border-gray-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 text-sm font-medium text-gray-700">Border Color</label>
+                      <input
+                        type="color"
+                        value={rectangles[selectedElement.index]?.borderColor || '#333333'}
+                        onChange={(e) => updateSelectedRectangle('borderColor', e.target.value)}
+                        className="px-1 py-1 w-full h-10 rounded-md border border-gray-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 text-sm font-medium text-gray-700">Border (px)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        value={rectangles[selectedElement.index]?.borderWidth || 0}
+                        onChange={(e) => updateSelectedRectangle('borderWidth', parseInt(e.target.value) || 0)}
+                        className="px-2 py-1 w-full text-sm rounded-md border border-gray-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 text-sm font-medium text-gray-700">Radius (px)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100" 
+                        value={rectangles[selectedElement.index]?.borderRadius || 0}
+                        onChange={(e) => updateSelectedRectangle('borderRadius', parseInt(e.target.value) || 0)}
+                        className="px-2 py-1 w-full text-sm rounded-md border border-gray-300"
+                      />
+                    </div>
                   </div>
 
-                  <div className="pt-3 mt-3 border-t">
-                    <p className="mb-2 text-sm text-gray-600">
-                      • Drag corner handles to resize (Hold Shift to maintain aspect ratio)
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      • Drag edge handles to resize in one direction
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      • Drag rectangle to reposition
-                    </p>
+                  <div className="pt-3 mt-2 border-t">
+                    <ul className="mb-3 space-y-1 text-sm list-disc list-inside text-left text-gray-600">
+                      <li>Drag corner/edge handles to resize.</li>
+                      <li>Drag rectangle to reposition.</li>
+                    </ul>
                      <button
                       onClick={() => {
                         if (!selectedElement || selectedElement.type !== 'rectangle') return;
