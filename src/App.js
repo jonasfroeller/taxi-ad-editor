@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { changeDpiDataUrl } from 'changedpi';
 import './App.css';
 
 const ThumbnailEditor = () => {
@@ -27,6 +28,7 @@ const ThumbnailEditor = () => {
   const [editingTextIndex, setEditingTextIndex] = useState(null);
   const [inlineInputValue, setInlineInputValue] = useState('');
   const [newTextPosition, setNewTextPosition] = useState({ x: 768 / 2, y: 256 / 2 });
+  const [exportPpi, setExportPpi] = useState(360);
 
   const initialBackgroundConfig = {
     type: 'solid', // solid, linear, radial
@@ -912,10 +914,18 @@ const ThumbnailEditor = () => {
     const link = document.createElement('a');
     link.download = `thumbnail_384x128.${exportFormat}`;
     
+    let finalDataUrl;
     if (exportFormat === 'png') {
-      link.href = exportCanvas.toDataURL('image/png');
+      finalDataUrl = exportCanvas.toDataURL('image/png');
     } else {
-      link.href = exportCanvas.toDataURL('image/jpeg', 0.95);
+      finalDataUrl = exportCanvas.toDataURL('image/jpeg');
+    }
+
+    if (finalDataUrl) {
+      const dpi = parseInt(exportPpi, 10) || 72;
+      link.href = changeDpiDataUrl(finalDataUrl, dpi);
+    } else {
+      return; // Fallback if data URL creation failed (should not happen with PNG/JPEG)
     }
     
     link.click();
@@ -1180,6 +1190,20 @@ const ThumbnailEditor = () => {
                 <div className="w-px h-6 bg-gray-300"></div>
 
                 <div className="flex gap-2 items-center">
+                  <label htmlFor="exportPpiInput" className="text-sm font-medium text-gray-700">PPI:</label>
+                  <input
+                    type="number"
+                    id="exportPpiInput"
+                    value={exportPpi}
+                    onChange={(e) => setExportPpi(parseInt(e.target.value, 10) || 0)}
+                    className="px-2 py-1 w-20 text-sm text-center rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                    min="72" 
+                  />
+                </div>
+                
+                <div className="w-px h-6 bg-gray-300"></div>
+
+                <div className="flex gap-2 items-center">
                   <label htmlFor="bgColorPicker" className="text-sm font-medium text-gray-700">BG Color:</label>
                   <input 
                     type="color" 
@@ -1220,7 +1244,7 @@ const ThumbnailEditor = () => {
                     onClick={exportCanvas}
                     className="px-4 py-2 text-white bg-green-500 rounded-md transition-colors hover:bg-green-600"
                   >
-                    Export 384×128
+                    Export 384×128 ({exportPpi} PPI)
                   </button>
                 </div>
 
