@@ -1541,13 +1541,15 @@ const ThumbnailEditor = () => {
                       onChange={(e) => updateSelectedText('fontFamily', e.target.value)}
                       className="px-3 py-2 w-full text-sm rounded-md border border-gray-300 cursor-pointer focus:ring-blue-500 focus:border-blue-500"
                     >
-                      <option value="Arial">Arial</option>
-                      <option value="Georgia">Georgia</option>
-                      <option value="Times New Roman">Times New Roman</option>
-                      <option value="Helvetica">Helvetica</option>
-                      <option value="Verdana">Verdana</option>
-                      <option value="Impact">Impact</option>
-                      <option value="Comic Sans MS">Comic Sans MS</option>
+                      <option value="Arial">Arial (sans-serif)</option>
+                      <option value="Verdana">Verdana (sans-serif)</option>
+                      <option value="Tahoma">Tahoma (sans-serif)</option>
+                      <option value="Trebuchet MS">Trebuchet MS (sans-serif)</option>
+                      <option value="Times New Roman">Times New Roman (serif)</option>
+                      <option value="Georgia">Georgia (serif)</option>
+                      <option value="Garamond">Garamond (serif)</option>
+                      <option value="Courier New">Courier New (monospace)</option>
+                      <option value="Brush Script MT">Brush Script MT (cursive)</option>
                     </select>
                   </div>
                   
@@ -1822,13 +1824,15 @@ const ThumbnailEditor = () => {
                     onChange={(e) => setTextStyle(prev => ({ ...prev, fontFamily: e.target.value }))}
                     className="px-3 py-2 w-full rounded-md border border-gray-300"
                   >
-                    <option value="Arial">Arial</option>
-                    <option value="Georgia">Georgia</option>
-                    <option value="Times New Roman">Times New Roman</option>
-                    <option value="Helvetica">Helvetica</option>
-                    <option value="Verdana">Verdana</option>
-                    <option value="Impact">Impact</option>
-                    <option value="Comic Sans MS">Comic Sans MS</option>
+                    <option value="Arial">Arial (sans-serif)</option>
+                    <option value="Verdana">Verdana (sans-serif)</option>
+                    <option value="Tahoma">Tahoma (sans-serif)</option>
+                    <option value="Trebuchet MS">Trebuchet MS (sans-serif)</option>
+                    <option value="Times New Roman">Times New Roman (serif)</option>
+                    <option value="Georgia">Georgia (serif)</option>
+                    <option value="Garamond">Garamond (serif)</option>
+                    <option value="Courier New">Courier New (monospace)</option>
+                    <option value="Brush Script MT">Brush Script MT (cursive)</option>
                   </select>
                 </div>
                 
